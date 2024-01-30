@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"fmt"
 	"net/http"
 
 	db "github.com/anabeto93/simple_bank/db/sqlc"
@@ -82,4 +83,84 @@ func (server *Server) listAccounts(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, accounts)
+}
+
+type updateAccountRequest struct {
+	Balance int64 `json:"balance" binding:"required,min=1"`
+}
+
+func (server *Server) updateAccount(ctx *gin.Context) {
+	// first get the account id
+	var idReq getAccountRequest
+	if err := ctx.ShouldBindUri(&idReq); err != nil {
+		ctx.JSON(http.StatusBadRequest, errorResponse(err))
+		return
+	}
+
+	// next validate the request body
+	var req updateAccountRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, errorResponse(err))
+		return
+	}
+
+	// next get the account
+	account, err := server.store.GetAccount(ctx, idReq.ID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			ctx.JSON(http.StatusNotFound, errorResponse(err))
+			return
+		}
+
+		ctx.JSON(http.StatusInternalServerError, errorResponse(err))
+		return
+	}
+
+	// next update the account
+	arg := db.UpdateAccountParams{
+		ID: idReq.ID,
+		Balance: req.Balance,
+	}
+
+	account, err = server.store.UpdateAccount(ctx, arg)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, errorResponse(err))
+		return
+	}
+
+	// finally return the updated account
+	ctx.JSON(http.StatusOK, account)
+}
+
+func (server *Server) deleteAccount(ctx *gin.Context) {
+	// first get the account id
+	var idReq getAccountRequest
+	if err := ctx.ShouldBindUri(&idReq); err != nil {
+		ctx.JSON(http.StatusBadRequest, errorResponse(err))
+		return
+	}
+
+	// next fetch the account
+	account, err := server.store.GetAccount(ctx, idReq.ID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			// log the error
+			fmt.Sprintf("account with id %d not found\n", idReq.ID)
+			ctx.JSON(http.StatusNotFound, errorResponse(err))
+			return
+		}
+
+		ctx.JSON(http.StatusInternalServerError, errorResponse(err))
+		return
+	}
+
+	// next delete the account
+	err = server.store.DeleteAccount(ctx, account.ID)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, errorResponse(err))
+		return
+	}
+
+	// finally return a no-content response
+	ctx.Status(http.StatusNoContent)
 }
